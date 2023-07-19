@@ -1,4 +1,6 @@
-use crate::utils::{cumulative_returns, normalise_returns};
+use crate::evaluation::{Evaluation, Metrics};
+use crate::models::WinRate;
+use crate::utils::{cumulative_returns, normalise_returns, round_float};
 use ndarray::arr1;
 
 
@@ -41,7 +43,7 @@ impl Backtest {
 
     /// Win Rate Stats
     /// Provide stats and win rates
-    fn win_rate_stats(&self, log_rets: &Vec<f64>) -> (f64, u32, u32, u32) {
+    fn win_rate_stats(&self, log_rets: &Vec<f64>) -> WinRate {
         let mut opened: u32 = 0;
         let mut closed: u32 = 0;
         let mut closed_profit: u32 = 0;
@@ -88,7 +90,7 @@ impl Backtest {
             win_rate = closed_profit as f64 / closed as f64;
         }
 
-        (win_rate, opened, closed, closed_profit)
+        WinRate { win_rate: round_float(win_rate, 2), opened, closed, closed_profit }
     }
 
     /// Add Vectors
@@ -105,7 +107,7 @@ impl Backtest {
     /// Asset_1: log_returns * signal (long, short neutral) * (sign as +1.0) * capital_weighting
     /// Asset_2: log_returns * signal (long, short neutral) * inverse (sign as -1.0) * capital_weighting
     /// The inverse is used for asset_2 as the original signal was constructed for asset 1. Asset 2 is just the other side
-    fn construct_portfolio_returns(&self, log_rets: Vec<f64>, trading_costs: &Vec<f64>, sign: f64,  weight: f64) -> (Vec<f64>, Vec<f64>) {
+    fn construct_portfolio_returns(&self, log_rets: Vec<f64>, trading_costs: &Vec<f64>, sign: f64,  weight: f64) -> Vec<f64> {
 
         // Get strategy returns
         let rets_arr = arr1(&log_rets);
@@ -116,60 +118,82 @@ impl Backtest {
         // Add trading costs
         let strat_log_rets_with_costs: Vec<f64> = self.add_vecs(&strat_log_rets, trading_costs);
 
-        // Get Cumulative returns
-        let strat_cum_log_rets: Vec<f64> = cumulative_returns(&strat_log_rets_with_costs);
-
-        // Normalise returns
-        let strat_cum_norm_rets: Vec<f64> = normalise_returns(&strat_cum_log_rets);
-
         // Returns
-        (strat_log_rets_with_costs, strat_cum_norm_rets)
+        strat_log_rets_with_costs
     }
 
-    /// Run Backtest
-    /// Performs all steps needed to execute a full backtest
-    pub fn run_backtest(&self, log_rets_1: Vec<f64>, log_rets_2: Vec<f64>) -> Result<(), String> {
+    /// Run Pairs Backtest
+    /// Performs all steps needed to execute a full backtest for a pairs trade
+    pub fn run_backtest(&self, log_rets_1: Vec<f64>, log_rets_2_opt: Option<Vec<f64>>) -> Result<String, String> {
 
-        // Get trading costs
+        // Trading costs
         let trading_costs: Vec<f64> = self.trade_costs();
 
         // Asset 1 Returns
-        let (strat_log_rets_1, strat_cum_norm_rets_1) = self.construct_portfolio_returns(
-            log_rets_1, &trading_costs, 1.0, self.weight_asset_1);
+        let strat_log_rets_1: Vec<f64> = self.construct_portfolio_returns(log_rets_1, &trading_costs, 1.0, self.weight_asset_1);
+        
+        // Log Returns (including asset 2 returns assumed as pairs trade if provided)
+        let log_returns: Vec<f64> = match log_rets_2_opt {
+            Some(log_rets_2) => {
+                let strat_log_rets_2: Vec<f64> = self.construct_portfolio_returns(log_rets_2, &trading_costs, -1.0, self.weight_asset_2);
+                self.add_vecs(&strat_log_rets_1, &strat_log_rets_2)
+            },
+            None => strat_log_rets_1
+        };
 
-        // Asset 2 Returns
-        let (strat_log_rets_2, strat_cum_norm_rets_2) = self.construct_portfolio_returns(
-            log_rets_2, &trading_costs, -1.0, self.weight_asset_2);
+        // Get Cumulative returns
+        let strat_cum_log_rets: Vec<f64> = cumulative_returns(&log_returns);
 
-        // Net Log Returns
-        let net_log_rets: Vec<f64> = self.add_vecs(&strat_log_rets_1, &strat_log_rets_2);
+        // Normalise returns
+        let cum_norm_returns: Vec<f64> = normalise_returns(&strat_cum_log_rets);
 
         // Win Rate Stats
-        let (win_rate, opened, closed, closed_profit) = self.win_rate_stats(&net_log_rets);
+        let win_rate_stats: WinRate = self.win_rate_stats(&log_returns);
 
-        // Net Cumulative Normal Returns
-        let net_cum_norm_rets: Vec<f64> = self.add_vecs(&strat_cum_norm_rets_1, &strat_cum_norm_rets_2);
-
-        Ok(())
+        // Evaluation Metrics
+        let evaluation: Evaluation = Evaluation::new(log_returns, cum_norm_returns, win_rate_stats);
+        let eval_metrics: Metrics = evaluation.run_evaluation_metrics();
+        
+        // Convert Evaluation Metrics to JSON str
+        let json_str: String = serde_json::to_string::<Metrics>(&eval_metrics)
+            .map_err(|e| e.to_string())?;
+    
+        // Return JSON string result
+        Ok(json_str)
     }
-
 }
-
-
-
-
 
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::get_test_data;
     use crate::models::Signals;
     use tradestats::metrics::{spread_standard, rolling_zscore};
+    use csv::Reader;
+    use serde::Deserialize;
+
+    #[derive(Debug, Deserialize)]
+    struct Record {
+      series_1: f64,
+      series_2: f64,
+    }
+    
+    pub fn get_test_data() -> (Vec<f64>, Vec<f64>) {
+      let mut rdr: Reader<std::fs::File> = Reader::from_path("data/data.csv").unwrap();
+      let mut series_1: Vec<f64> = vec![];
+      let mut series_2: Vec<f64> = vec![];
+      for result in rdr.deserialize() {
+        let record: Record = result.unwrap();
+        series_1.push(record.series_1);
+        series_2.push(record.series_2);
+      }
+      (series_1, series_2)
+    }
+    
 
     #[test]
-    fn tests_equity_curve() {
+    fn tests_backtest() {
         let (series_1, series_2) = get_test_data();
         let log_rets_1: Vec<f64> = tradestats::utils::log_returns(&series_1, true);
         let log_rets_2: Vec<f64> = tradestats::utils::log_returns(&series_2, true);
@@ -212,6 +236,8 @@ mod tests {
         
         // Run Backtest
         let backtest: Backtest = Backtest::new(net_signals, trading_costs, weighting_asset_1, weighting_asset_2);
-        backtest.run_backtest(log_rets_1, log_rets_2);
+        let backtest_result: Result<String, String> = backtest.run_backtest(log_rets_1, Some(log_rets_2));
+        dbg!(&backtest_result);
+        assert!(backtest_result.unwrap().len() > 100);
     }
 }

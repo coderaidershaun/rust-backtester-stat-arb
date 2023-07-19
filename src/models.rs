@@ -99,17 +99,15 @@ impl Signals {
     for inner_i in 0..inner_len {
         for i in 0..signals_arr.len() {
             let val: f64 = signals_arr[i][inner_i];
-            match val {
-                1.0 => {
-                    sigs.push(1.0);
-                    break;
-                },
-                -1.0 => {
-                    sigs.push(-1.0);
-                    break;
-                },
-                _ => {}
-            };
+            
+            if val == 1.0 {
+              sigs.push(1.0);
+              break;
+            } else if val == -1.0 {
+              sigs.push(-1.0);
+              break;
+            }
+
             if i + 1 == signals_arr.len() { sigs.push(0.0) }
         }
     }
@@ -118,44 +116,14 @@ impl Signals {
 }
 
 /*
-  TradeStats
+  Win Rate Stats
   Figures for number of trades placed
 */
 
-#[derive(Debug)]
-pub struct TradeStats {
-  net_opened: u32,
-  net_closed: u32,
-  longs_profitable: u32,
-  shorts_profitable: u32,
-  net_win_rate: f64,
-}
-
-/*
-  Metrics
-  Metrics for trading performance evaluation
-*/
-
-#[derive(Debug)]
-pub struct Metrics {
-  pub trade_stats: Option<TradeStats>,
-  pub arr: f64,
-  pub roi: f64,
-  pub sharpe_ratio: f64,
-  pub sortino_ratio: f64,
-  pub max_drawdown: f64,
-  pub drawdowns: Vec<f64>,
-}
-
-impl Metrics {
-  pub fn new() -> Self {
-    Self {
-      trade_stats: None, arr: 0.0, roi: 0.0, sharpe_ratio: 0.0,
-      sortino_ratio: 0.0, max_drawdown: 0.0, drawdowns: vec![]
-    }
-  }
-
-
-
-
+#[derive(Debug, Serialize, Clone)]
+pub struct WinRate {
+  pub win_rate: f64,
+  pub opened: u32,
+  pub closed: u32,
+  pub closed_profit: u32
 }
