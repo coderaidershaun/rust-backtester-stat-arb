@@ -3,14 +3,101 @@ use ndarray::arr1;
 
 
 pub struct Backtest {
+    signals: Vec<f64>,
+    trading_costs: f64,
     weight_asset_1: f64, // Capital percentage on asset 1 between 0 and 1.0
     weight_asset_2: f64, // Capital percentage on asset 2 between 0 and 1.0
-    signals: Option<Vec<f64>>
 }
 
 impl Backtest {
-    pub fn new(weight_asset_1: f64, weight_asset_2: f64) -> Self {
-        Self { weight_asset_1, weight_asset_2, signals: None }
+    pub fn new(signals: Vec<f64>, trading_costs: f64, weight_asset_1: f64, weight_asset_2: f64) -> Self {
+        Self { weight_asset_1, trading_costs, weight_asset_2, signals }
+    }
+
+    /// Trade Costs
+    /// Returns trading costs in correct sequence based on signals
+    fn trade_costs(&self) -> Vec<f64> {
+        let mut trading_costs: Vec<f64> = vec![0.0; self.signals.len()];
+        for i in 1..self.signals.len() {
+            let val: f64 = self.signals[i];
+            let prev_val: f64 = self.signals[i - 1];
+
+            // Trade Closed
+            if val == 0.0 && prev_val != 0.0 {
+                trading_costs[i - 1] = -self.trading_costs;
+            
+            // Trade Opened
+            } else if val != 0.0 && prev_val == 0.0 {
+                trading_costs[i] = -self.trading_costs;
+
+            // Trade Closed and Opened (switched sides)
+            } else if val != 0.0 && prev_val != 0.0 && val != prev_val {
+                trading_costs[i - 1] = -self.trading_costs;
+                trading_costs[i] = -self.trading_costs;
+            }
+        }
+        trading_costs
+    }
+
+    /// Win Rate Stats
+    /// Provide stats and win rates
+    fn win_rate_stats(&self, log_rets: &Vec<f64>) -> (f64, u32, u32, u32) {
+        let mut opened: u32 = 0;
+        let mut closed: u32 = 0;
+        let mut closed_profit: u32 = 0;
+        let mut curr_profit: f64 = 0.0;
+        let mut is_open: bool = false;
+
+        for i in 1..self.signals.len() {
+            let val: f64 = self.signals[i];
+            let prev_val: f64 = self.signals[i - 1];
+
+            // Trade Closed
+            if val == 0.0 && prev_val != 0.0 {
+                is_open = false;
+                closed += 1;
+                if curr_profit > 0.0 {
+                    closed_profit += 1;
+                }
+                curr_profit = 0.0;
+
+            // Trade Opened
+            } else if val != 0.0 && prev_val == 0.0 {
+                is_open = true;
+                opened += 1;
+                curr_profit += log_rets[i];
+
+            // Trade Closed and Opened (switched sides)
+            } else if val != 0.0 && prev_val != 0.0 && val != prev_val {
+                closed += 1;
+                if curr_profit > 0.0 {
+                    closed_profit += 1;
+                }
+                curr_profit += log_rets[i];
+                is_open = true;
+                opened += 1;
+            
+            // Accumulate profits
+            } else if is_open {
+                curr_profit += log_rets[i];
+            }
+        }
+        
+        let mut win_rate: f64 = 0.0;
+        if closed_profit > 0 && closed > 0 {
+            win_rate = closed_profit as f64 / closed as f64;
+        }
+
+        (win_rate, opened, closed, closed_profit)
+    }
+
+    /// Add Vectors
+    /// Adds two vectors together
+    fn add_vecs(&self, vec_1: &Vec<f64>, vec_2: &Vec<f64>) -> Vec<f64> {
+        let arr_1 = arr1(&vec_1);
+        let arr_2 = arr1(&vec_2);
+        let net_arr = arr_1 + arr_2;
+        net_arr.to_vec()
     }
 
     /// Construct Portfolio Returns
@@ -18,81 +105,56 @@ impl Backtest {
     /// Asset_1: log_returns * signal (long, short neutral) * (sign as +1.0) * capital_weighting
     /// Asset_2: log_returns * signal (long, short neutral) * inverse (sign as -1.0) * capital_weighting
     /// The inverse is used for asset_2 as the original signal was constructed for asset 1. Asset 2 is just the other side
-    fn construct_portfolio_returns(&self, log_rets: Vec<f64>, sign: f64,  weight: f64) -> Result<(), String> {
-
-        if let None = self.signals {
-            return Err("Please generate and consolidate signals before running this function".to_string());
-        }
+    fn construct_portfolio_returns(&self, log_rets: Vec<f64>, trading_costs: &Vec<f64>, sign: f64,  weight: f64) -> (Vec<f64>, Vec<f64>) {
 
         // Get strategy returns
         let rets_arr = arr1(&log_rets);
-        let sig_arr = arr1(self.signals.as_ref().unwrap());
-        let strat_log_rets = rets_arr * sig_arr * sign * weight;
+        let sig_arr = arr1(&self.signals);
+        let strat_log_rets_arr = rets_arr * sig_arr * sign * weight;
+        let strat_log_rets = strat_log_rets_arr.to_vec();
+        
+        // Add trading costs
+        let strat_log_rets_with_costs: Vec<f64> = self.add_vecs(&strat_log_rets, trading_costs);
 
         // Get Cumulative returns
-        let strat_cum_log_rets: Vec<f64> = cumulative_returns(&strat_log_rets.to_vec());
+        let strat_cum_log_rets: Vec<f64> = cumulative_returns(&strat_log_rets_with_costs);
 
         // Normalise returns
         let strat_cum_norm_rets: Vec<f64> = normalise_returns(&strat_cum_log_rets);
 
-        Ok(())
+        // Returns
+        (strat_log_rets_with_costs, strat_cum_norm_rets)
     }
 
     /// Run Backtest
+    /// Performs all steps needed to execute a full backtest
     pub fn run_backtest(&self, log_rets_1: Vec<f64>, log_rets_2: Vec<f64>) -> Result<(), String> {
 
-        if let None = self.signals {
-            return Err("Please generate and consolidate signals before running a backtest".to_string());
-        }
+        // Get trading costs
+        let trading_costs: Vec<f64> = self.trade_costs();
 
-        self.construct_portfolio_returns(log_rets_1, 1.0, self.weight_asset_1);
-        self.construct_portfolio_returns(log_rets_2, -1.0, self.weight_asset_2);
+        // Asset 1 Returns
+        let (strat_log_rets_1, strat_cum_norm_rets_1) = self.construct_portfolio_returns(
+            log_rets_1, &trading_costs, 1.0, self.weight_asset_1);
+
+        // Asset 2 Returns
+        let (strat_log_rets_2, strat_cum_norm_rets_2) = self.construct_portfolio_returns(
+            log_rets_2, &trading_costs, -1.0, self.weight_asset_2);
+
+        // Net Log Returns
+        let net_log_rets: Vec<f64> = self.add_vecs(&strat_log_rets_1, &strat_log_rets_2);
+
+        // Win Rate Stats
+        let (win_rate, opened, closed, closed_profit) = self.win_rate_stats(&net_log_rets);
+
+        // Net Cumulative Normal Returns
+        let net_cum_norm_rets: Vec<f64> = self.add_vecs(&strat_cum_norm_rets_1, &strat_cum_norm_rets_2);
 
         Ok(())
     }
 
 }
 
-/// Trade Counts
-/// Provides number of open and closed trades based upon signals
-fn trade_counts(signals: &Vec<f64>) {
-    let mut long_opens: u32 = 0;
-    let mut long_closes: u32 = 0;
-    let mut short_opens: u32 = 0;
-    let mut short_closes: u32 = 0;
-
-    // All positions are positive and used for cost placing
-    let mut positions: Vec<f64> = vec![0.0]; 
-    for i in 1..signals.len() - 1 {
-        let val: f64 = signals[i];
-        let prev_val: f64 = signals[i - 1];
-
-        // Position was opened
-        if val == 1.0 && prev_val == 0.0 {
-            positions.push(1.0);
-            long_opens += 1;
-        } else if val == -1.0 && prev_val == 0.0 {
-            positions.push(1.0);
-            short_opens += 1;
-        } else if val == 0.0 && prev_val == 1.0 { 
-            positions.push(1.0);
-            long_closes += 1; 
-        } else if val == 0.0 && prev_val == -1.0 {
-            positions.push(1.0);
-            short_closes += 1;
-        } else if val == 1.0 && prev_val == -1.0 {
-            positions.push(1.0);
-            short_closes += 1;
-            long_opens += 1;
-        } else if val == -1.0 && prev_val == 1.0 { 
-            positions.push(1.0);
-            long_closes += 1;
-            short_opens += 1;
-        } else {
-            positions.push(0.0);
-        }
-    }
-}
 
 
 
@@ -103,7 +165,7 @@ fn trade_counts(signals: &Vec<f64>) {
 mod tests {
     use super::*;
     use crate::get_test_data;
-    use crate::models::{Signals, SignalType};
+    use crate::models::Signals;
     use tradestats::metrics::{spread_standard, rolling_zscore};
 
     #[test]
@@ -115,6 +177,7 @@ mod tests {
         let spread: Vec<f64> = spread_standard(&series_1, &series_2).unwrap();
         let roll_zscore: Vec<f64> = rolling_zscore(&spread, 21).unwrap();
 
+        let trading_costs: f64 = 0.001;
         let weighting_asset_1: f64 = 1.0; // Amount of capital to assign to asset 1
         let weighting_asset_2: f64 = 1.0; // Amount of capital to assign to asset 2
 
@@ -147,6 +210,8 @@ mod tests {
         // Consolidate signals
         let net_signals: Vec<f64> = signals_obj.consolidate_signals(vec![long_signals, short_signals]);
         
-        // run_backtest(log_rets_1, log_rets_2, signals_main, weighting_asset_1, weighting_asset_2);
+        // Run Backtest
+        let backtest: Backtest = Backtest::new(net_signals, trading_costs, weighting_asset_1, weighting_asset_2);
+        backtest.run_backtest(log_rets_1, log_rets_2);
     }
 }

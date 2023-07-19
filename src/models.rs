@@ -124,10 +124,6 @@ impl Signals {
 
 #[derive(Debug)]
 pub struct TradeStats {
-  longs_opened: u32,
-  shorts_opened: u32,
-  longs_closed: u32,
-  shorts_closed: u32,
   net_opened: u32,
   net_closed: u32,
   longs_profitable: u32,
