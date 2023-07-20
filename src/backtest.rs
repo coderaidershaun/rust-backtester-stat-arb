@@ -124,7 +124,7 @@ impl Backtest {
 
     /// Run Pairs Backtest
     /// Performs all steps needed to execute a full backtest for a pairs trade
-    pub fn run_backtest(&self, log_rets_1: Vec<f64>, log_rets_2_opt: Option<Vec<f64>>) -> Result<String, String> {
+    pub fn run_backtest(&self, log_rets_1: Vec<f64>, log_rets_2_opt: Option<Vec<f64>>) -> Result<Metrics, String> {
 
         // Trading costs
         let trading_costs: Vec<f64> = self.trade_costs();
@@ -153,13 +153,9 @@ impl Backtest {
         // Evaluation Metrics
         let evaluation: Evaluation = Evaluation::new(log_returns, cum_norm_returns, win_rate_stats);
         let eval_metrics: Metrics = evaluation.run_evaluation_metrics();
-        
-        // Convert Evaluation Metrics to JSON str
-        let json_str: String = serde_json::to_string::<Metrics>(&eval_metrics)
-            .map_err(|e| e.to_string())?;
     
         // Return JSON string result
-        Ok(json_str)
+        Ok(eval_metrics)
     }
 }
 
@@ -236,8 +232,10 @@ mod tests {
         
         // Run Backtest
         let backtest: Backtest = Backtest::new(net_signals, trading_costs, weighting_asset_1, weighting_asset_2);
-        let backtest_result: Result<String, String> = backtest.run_backtest(log_rets_1, Some(log_rets_2));
-        dbg!(&backtest_result);
-        assert!(backtest_result.unwrap().len() > 100);
+        let backtest_result: Result<Metrics, String> = backtest.run_backtest(log_rets_1, Some(log_rets_2));
+        match backtest_result {
+            Ok(_) => assert!(true),
+            Err(_) => assert!(false)
+        }
     }
 }
