@@ -2,7 +2,7 @@ use crate::models::WinRate;
 use crate::utils::{normalise_returns, round_float};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Metrics {
   pub arr: f64,
   pub drawdowns: Vec<f64>,

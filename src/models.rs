@@ -120,7 +120,7 @@ impl Signals {
   Figures for number of trades placed
 */
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct WinRate {
   pub win_rate: f64,
   pub opened: u32,
