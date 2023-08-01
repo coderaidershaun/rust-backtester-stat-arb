@@ -1,6 +1,6 @@
 use crate::models::WinRate;
 use crate::utils::{normalise_returns, round_float};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
 pub struct Metrics {
