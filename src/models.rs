@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
   Supporting generating opening and closing of positions
 */
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub enum SignalType {
   Long,
   Short
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Signals {
           // open       // close
   pub eq: (Option<f64>, Option<f64>),
