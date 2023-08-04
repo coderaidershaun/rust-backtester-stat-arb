@@ -6,13 +6,13 @@ use ts_rs::TS;
   Supporting generating opening and closing of positions
 */
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, TS)]
 pub enum SignalType {
   Long,
   Short
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, TS)]
 pub struct Signals {
           // open       // close
   pub eq: (Option<f64>, Option<f64>),
