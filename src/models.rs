@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /*
   Triggers Model
@@ -120,7 +121,7 @@ impl Signals {
   Figures for number of trades placed
 */
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, TS)]
 pub struct WinRate {
   pub win_rate: f64,
   pub opened: u32,

@@ -1,8 +1,9 @@
 use crate::models::WinRate;
 use crate::utils::{normalise_returns, round_float};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, TS)]
 pub struct Metrics {
   pub arr: f64,
   pub drawdowns: Vec<f64>,
